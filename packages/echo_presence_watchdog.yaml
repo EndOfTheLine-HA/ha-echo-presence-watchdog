@@ -1,0 +1,159 @@
+# Echo presence watchdog
+# https://github.com/EndOfTheLine-HA/ha-echo-presence-watchdog
+#
+# For the "Echo presence through Alexa routines" setup: an Alexa routine turns a Home
+# Assistant switch on when an Echo detects presence, and a second routine turns it off.
+# If Alexa loses the link between a routine and its switch, the routine keeps running but
+# changes nothing, and the switch silently keeps its last state.
+#
+# This package records the last time ALEXA changed each switch (a Home Assistant restart or
+# a change you make in Home Assistant does not count). Every morning at 9:00 it sends a push
+# for any switch Alexa has not changed in 24 hours. Run "Echo presence - daily Alexa check"
+# by hand to get a status push with every switch's age instead.
+#
+# Setup: search this file for CHANGE ME. There are four things to set:
+#   1. Your switch entity ids (two places in the first automation, one in the second).
+#   2. Your Home Assistant Cloud user id (see README: "Find your Home Assistant Cloud user id").
+#   3. Your notify action (two places).
+#   4. Your alarm entity, or delete that condition.
+# Add or remove rooms by copying or deleting one helper and its lines in both automations.
+#
+# Remove: delete this file, then reload Automations and Input datetimes (or restart).
+
+input_datetime:
+  # One helper per switch. No "initial:", so the value survives restarts.
+  echo_presence_kitchen_last_alexa:
+    name: Echo presence Kitchen last Alexa update
+    has_date: true
+    has_time: true
+    icon: mdi:account-clock
+  echo_presence_desk_last_alexa:
+    name: Echo presence Desk last Alexa update
+    has_date: true
+    has_time: true
+    icon: mdi:account-clock
+  echo_presence_dashboard_last_alexa:
+    name: Echo presence Dashboard last Alexa update
+    has_date: true
+    has_time: true
+    icon: mdi:account-clock
+  echo_presence_bedroom_last_alexa:
+    name: Echo presence Bedroom last Alexa update
+    has_date: true
+    has_time: true
+    icon: mdi:account-clock
+
+automation:
+  - id: echo_presence_record_alexa_update
+    alias: Echo presence - record Alexa update
+    description: >-
+      When Alexa (the Home Assistant Cloud user) turns one of the Echo presence switches on
+      or off, store the time in that switch's "last Alexa update" helper.
+    mode: queued
+    max: 20
+    triggers:
+      - trigger: state
+        # CHANGE ME (1): your presence switches.
+        entity_id:
+          - switch.kitchen_presence
+          - switch.desk_presence
+          - switch.dashboard_presence
+          - switch.bedroom_presence
+        to:
+          - "on"
+          - "off"
+    conditions:
+      # Only count changes made by the Home Assistant Cloud user, which is how Alexa's
+      # commands arrive. If you ever relink Home Assistant Cloud and the id changes, the
+      # helpers stop updating and the daily check tells you.
+      - condition: template
+        # CHANGE ME (2): your Home Assistant Cloud user id, a 32-character string.
+        value_template: "{{ trigger.to_state.context.user_id == 'YOUR_HA_CLOUD_USER_ID' }}"
+    variables:
+      # CHANGE ME (1): each switch and its helper.
+      helper_for:
+        switch.kitchen_presence: input_datetime.echo_presence_kitchen_last_alexa
+        switch.desk_presence: input_datetime.echo_presence_desk_last_alexa
+        switch.dashboard_presence: input_datetime.echo_presence_dashboard_last_alexa
+        switch.bedroom_presence: input_datetime.echo_presence_bedroom_last_alexa
+    actions:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: "{{ helper_for[trigger.entity_id] }}"
+        data:
+          timestamp: "{{ as_timestamp(trigger.to_state.last_changed) }}"
+
+  - id: echo_presence_daily_alexa_check
+    alias: Echo presence - daily Alexa check
+    description: >-
+      9:00 AM daily: push an alert for any Echo presence switch Alexa has not changed in
+      24 hours (its Alexa routine has probably lost the switch). Skipped while the alarm is
+      armed away. Run it by hand to get a status push with every switch's age.
+    mode: single
+    triggers:
+      - trigger: time
+        at: "09:00:00"
+        id: daily
+    conditions:
+      # CHANGE ME (4): your alarm panel, so an empty house does not raise alerts.
+      # No alarm? Delete this whole condition (the five lines starting at "- condition: not").
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: alarm_control_panel.your_alarm
+            state: armed_away
+    variables:
+      # A room nobody enters for a whole day will alert, and so will a room someone never
+      # leaves (its switch stays on). Raise this if that is normal for you.
+      max_age_hours: 24
+      # CHANGE ME (1): the name to show for each room, and its helper.
+      helpers:
+        Kitchen: input_datetime.echo_presence_kitchen_last_alexa
+        Desk: input_datetime.echo_presence_desk_last_alexa
+        Dashboard: input_datetime.echo_presence_dashboard_last_alexa
+        Bedroom: input_datetime.echo_presence_bedroom_last_alexa
+      stale: >-
+        {%- set ns = namespace(out=[]) -%}
+        {%- for name, eid in helpers.items() -%}
+          {%- set ts = state_attr(eid, 'timestamp') -%}
+          {%- if ts is not number or as_timestamp(now()) - ts > max_age_hours * 3600 -%}
+            {%- set ns.out = ns.out + [name] -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {{ ns.out }}
+      summary: >-
+        {%- set ns = namespace(out=[]) -%}
+        {%- for name, eid in helpers.items() -%}
+          {%- set ts = state_attr(eid, 'timestamp') -%}
+          {%- if ts is number and ts > 86400 -%}
+            {%- set ns.out = ns.out + [name ~ ' ' ~ ((as_timestamp(now()) - ts) / 3600) | round(1) ~ ' h ago'] -%}
+          {%- else -%}
+            {%- set ns.out = ns.out + [name ~ ' never'] -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {{ ns.out | join(', ') }}
+    actions:
+      - if:
+          - condition: template
+            value_template: "{{ stale | count > 0 }}"
+        then:
+          # CHANGE ME (3): your notify action, for example notify.mobile_app_<your phone>.
+          - action: notify.mobile_app_your_phone
+            data:
+              title: "Echo presence: Alexa stopped updating"
+              message: >-
+                No Alexa update in over {{ max_age_hours }} h for {{ stale | join(', ') }}
+                ({{ summary }}). The Alexa routine has probably lost its Home Assistant
+                switch: in the Alexa app open Routines, open that presence routine and
+                pick the switch again.
+        else:
+          # A manual run (not the 9:00 trigger) sends a status push even when all is well.
+          - if:
+              - condition: template
+                value_template: "{{ trigger.id | default('manual') != 'daily' }}"
+            then:
+              # CHANGE ME (3): same notify action as above.
+              - action: notify.mobile_app_your_phone
+                data:
+                  title: "Echo presence check: all OK"
+                  message: "Last Alexa update: {{ summary }}."
