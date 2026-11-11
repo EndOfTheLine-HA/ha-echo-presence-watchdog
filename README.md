@@ -4,13 +4,14 @@ A Home Assistant package that tells you when your Echo presence switches stop up
 
 It is for the setup where an Alexa routine turns a Home Assistant switch on when an Echo detects people, and a second routine turns it off. The method comes from NickC's 2022 community guide, [Simple way to get Amazon Echo 4th generation ultrasound motion/presence sensors into Home Assistant](https://community.home-assistant.io/t/394058). If Alexa loses the link between a routine and its switch, the routine keeps running but changes nothing, and the switch keeps its last state with no error anywhere. This package catches that.
 
-Write-up: the homeautomated.net article (link added when it is published).
+Write-up: [Alexa Routines as Presence Sensors: How to Build Them and How They Quietly Break](https://homeautomated.net/investigations/alexa-routines-presence-sensors) on homeautomated.net.
 
 ## The setup it watches
 
 - One switch per Echo that does nothing on its own. A template switch with no actions works (**Settings > Devices & services > Helpers > Create helper > Template > Switch**), and so does a Toggle helper.
 - The switches exposed to Alexa through Home Assistant Cloud (**Settings > Voice assistants > Expose**).
-- Two Alexa routines per Echo. In the Alexa app: **When** that Echo, **People are detected**, then **Alexa will** set the switch to **Power: On**. A second routine with **People aren't detected** and **Power: Off**.
+- Two Alexa routines per Echo. In the Alexa app, open **Routines**, tap **+**, choose **Presence Detection** (under Events with People Recognition) and pick the Echo. **When** that Echo, **People are detected**, then **Alexa will** set the switch to **Power: On**. A second routine with **People aren't detected** and **Power: Off**.
+- Only Echos the Alexa app offers for Presence Detection can do this. If the app shows **Set up now** next to an Echo, follow that prompt first.
 
 ## What it does
 
@@ -40,15 +41,17 @@ It ships as a package, not a blueprint, because it creates its own helpers and b
 3. Open it and change everything marked `CHANGE ME`:
    1. your switch entity ids,
    2. your Home Assistant Cloud user id (next section),
-   3. your notify action,
+   3. your notify action (it appears twice),
    4. your alarm entity, or delete that condition.
+
+   The file comes with four sample rooms. Each room appears in four places: its helper, the trigger list, the switch-to-helper map, and the daily check's list. Keep those in step, and delete sample rooms you don't use from all four.
 4. Check the configuration (**Developer tools > YAML > Check configuration**), then restart, or reload **Automations** and **Input datetimes**.
-5. Walk into each room. That room's "last Alexa update" helper should jump to the current time. If it doesn't, the user id is wrong.
+5. In each room, let Alexa turn the switch on and then off (walk in, then leave, or run each routine from the Alexa app). That room's "last Alexa update" helper should jump to the current time after each change. If the switch changes but the helper doesn't, check the user id and the switch-to-helper map. If the switch doesn't change, check the routine.
 
 ## Find your Home Assistant Cloud user id
 
-1. Let Alexa change one of your presence switches: walk into the room, or run the routine from the Alexa app.
-2. In **Developer tools > Template**, enter (with your own switch):
+1. Let Alexa change one of your presence switches from off to on or on to off: walk into the room, or run the routine from the Alexa app.
+2. Straight away, in **Developer tools > Template**, enter (with your own switch):
 
    ```
    {{ states.switch.kitchen_presence.context.user_id }}
